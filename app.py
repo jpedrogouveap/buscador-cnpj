@@ -25,7 +25,7 @@ else:
     gemini_api_key = st.sidebar.text_input(
         "Cole sua API Key do Gemini:",
         type="password",
-        help="Insira a chave do Google AI Studio. Para não precisar digitar sempre, salve no menu Secrets do Streamlit Cloud."
+        help="Insira a chave do Google AI Studio."
     )
 
 # --- FUNÇÕES AUXILIARES DE BUSCA E DADOS ---
@@ -57,14 +57,12 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
     textos_resultados = []
     try:
         ddgs = DDGS()
-        # Busca 1: Focada no Sócio + Escola + Cargos de Liderança
         if nome_socio and nome_socio != "Sócio não identificado":
             q1 = f'"{nome_socio}" "{nome_fantasia}" (diretor OR mantenedor OR proprietario OR dono OR whatsapp OR celular)'
             r1 = list(ddgs.text(q1, max_results=4))
             for r in r1:
                 textos_resultados.append(f"- [Sócio/Liderança]: {r.get('title')}: {r.get('body')}")
             
-        # Busca 2: Focada nos Canais Diretos da Escola
         q2 = f'"{nome_fantasia}" (escola OR colegio) (direção OR mantenedora OR comercial OR matriculas OR whatsapp OR "9")'
         r2 = list(ddgs.text(q2, max_results=4))
         for r in r2:
@@ -78,20 +76,8 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
-        
-        # Seleção dinâmica de modelos para evitar erro 404
-        nome_modelo = "gemini-1.5-flash"
-        try:
-            modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            flash_models = [m for m in modelos if 'flash' in m]
-            if flash_models:
-                nome_modelo = flash_models[0]
-            elif modelos:
-                nome_modelo = modelos[0]
-        except Exception:
-            pass
-            
-        model = genai.GenerativeModel(nome_modelo)
+        # Modelo oficial estável da API gratuita
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
         Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
@@ -137,7 +123,7 @@ if st.button("Buscar Contatos", type="primary"):
                 
                 st.success("✅ Escola localizada com sucesso!")
                 
-                # --- NOVO LAYOUT LIMPO E EXPANDIDO ---
+                # Container limpo com textos completos sem corte
                 with st.container(border=True):
                     st.subheader("📋 Dados Cadastrais da Instituição")
                     col1, col2 = st.columns(2)
@@ -174,7 +160,6 @@ if st.button("Buscar Contatos", type="primary"):
                         st.markdown("**Relatório de Contatos e Liderança:**")
                         st.markdown(resultado_gemini)
                         
-                        # Extração para geração do botão do WhatsApp
                         numeros_encontrados = re.findall(r'(?:55)?\s?(?:[1-9]{2})\s?9?[0-9]{4}[-\s]?[0-9]{4}', resultado_gemini)
                         if numeros_encontrados:
                             num_limpo = re.sub(r'\D', '', numeros_encontrados[0])
