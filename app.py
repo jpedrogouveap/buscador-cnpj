@@ -6,15 +6,15 @@ import google.generativeai as genai
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Buscador de Mantenedores e Escolas OSINT",
+    page_title="Buscador de Mantenedores v2.0",
     page_icon="🏫",
     layout="wide"
 )
 
-st.title("🏫 Buscador de Sócios e Mantenedores de Escolas")
+st.title("🏫 Buscador de Sócios e Mantenedores de Escolas [v2.0]")
 st.caption("Investigação OSINT para o setor educacional (BrasilAPI, RDAP/Registro.br, DuckDuckGo e Gemini AI).")
 
-# --- GERENCIAMENTO DA API KEY (SECRETS OU SIDEBAR) ---
+# --- GERENCIAMENTO DA API KEY ---
 api_key_salva = st.secrets.get("GEMINI_API_KEY", "")
 
 st.sidebar.header("⚙️ Configurações")
@@ -28,7 +28,6 @@ else:
         help="Insira a chave do Google AI Studio."
     )
 
-# --- FUNÇÕES AUXILIARES DE BUSCA E DADOS ---
 def limpar_cnpj(cnpj_raw: str) -> str:
     return re.sub(r'\D', '', cnpj_raw)
 
@@ -73,48 +72,13 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
         
     return "\n".join(textos_resultados) if textos_resultados else "Nenhum resultado obtido na busca web."
 
-def obter_modelo_gemini_valido():
-    """Identifica dinamicamente os modelos ativos e suportados na conta."""
-    modelos_candidatos = []
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                modelos_candidatos.append(m.name)
-    except Exception:
-        pass
-
-    # Escolhe preferencialmente modelos 'flash' ou o primeiro disponível na conta
-    if modelos_candidatos:
-        for m in modelos_candidatos:
-            if 'flash' in m:
-                return genai.GenerativeModel(m)
-        return genai.GenerativeModel(modelos_candidatos[0])
-
-    # Tentativas de fallback manual caso a listagem dinâmica falhe
-    fallback_names = [
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-        'gemini-2.0-flash',
-        'gemini-2.5-flash',
-        'gemini-1.5-pro',
-        'gemini-pro'
-    ]
-    
-    for name in fallback_names:
-        try:
-            return genai.GenerativeModel(name)
-        except Exception:
-            continue
-            
-    return genai.GenerativeModel('gemini-1.5-flash')
-
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
         
-        # Obtém o modelo ativo dinamicamente
-        model = obter_modelo_gemini_valido()
-        
+        # Chamada direta ao modelo indicado na mensagem de erro da API
+        model = genai.GenerativeModel('gemini-3.8-flash')
+
         prompt = f"""
         Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
         Analise as informações obtidas na web para a escola '{nome_fantasia}' ({razao_social}) e o sócio/mantenedor '{nome_socio}'.
@@ -159,7 +123,6 @@ if st.button("Buscar Contatos", type="primary"):
                 
                 st.success("✅ Escola localizada com sucesso!")
                 
-                # Container limpo com textos completos sem corte
                 with st.container(border=True):
                     st.subheader("📋 Dados Cadastrais da Instituição")
                     col1, col2 = st.columns(2)
@@ -170,7 +133,6 @@ if st.button("Buscar Contatos", type="primary"):
                         st.markdown(f"**Telefone Oficial (Receita):**\n{tel_oficial if len(tel_oficial) > 4 else 'Não informado'}")
                         st.markdown(f"**CNPJ:**\n{cnpj_limpo}")
                 
-                # Registro do Domínio (RDAP)
                 site_contato = dados_empresa.get("email")
                 if site_contato and isinstance(site_contato, str) and "@" in site_contato:
                     dominio = site_contato.split("@")[-1]
