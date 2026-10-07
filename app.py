@@ -73,11 +73,47 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
         
     return "\n".join(textos_resultados) if textos_resultados else "Nenhum resultado obtido na busca web."
 
+def obter_modelo_gemini_valido():
+    """Identifica dinamicamente os modelos ativos e suportados na conta."""
+    modelos_candidatos = []
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                modelos_candidatos.append(m.name)
+    except Exception:
+        pass
+
+    # Escolhe preferencialmente modelos 'flash' ou o primeiro disponível na conta
+    if modelos_candidatos:
+        for m in modelos_candidatos:
+            if 'flash' in m:
+                return genai.GenerativeModel(m)
+        return genai.GenerativeModel(modelos_candidatos[0])
+
+    # Tentativas de fallback manual caso a listagem dinâmica falhe
+    fallback_names = [
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.5-flash',
+        'gemini-1.5-pro',
+        'gemini-pro'
+    ]
+    
+    for name in fallback_names:
+        try:
+            return genai.GenerativeModel(name)
+        except Exception:
+            continue
+            
+    return genai.GenerativeModel('gemini-1.5-flash')
+
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
-        # Modelo oficial estável da API gratuita
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Obtém o modelo ativo dinamicamente
+        model = obter_modelo_gemini_valido()
         
         prompt = f"""
         Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
