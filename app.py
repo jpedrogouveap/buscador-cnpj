@@ -12,17 +12,23 @@ st.set_page_config(
 )
 
 st.title("🏫 Buscador de Sócios e Mantenedores de Escolas")
-st.caption("Investigação OSINT direcionada para o setor educacional (BrasilAPI, RDAP/Registro.br, DuckDuckGo e Gemini AI).")
+st.caption("Investigação OSINT para o setor educacional (BrasilAPI, RDAP/Registro.br, DuckDuckGo e Gemini AI).")
 
-# --- BARRA LATERAL ---
-st.sidebar.header("Configurações")
-gemini_api_key = st.sidebar.text_input(
-    "Cole a sua API Key do Gemini (Pessoal):",
-    type="password",
-    help="Insira a chave gerada no Google AI Studio com o seu Gmail Pessoal."
-)
+# --- GERENCIAMENTO DA API KEY (SECRETS OU SIDEBAR) ---
+api_key_salva = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- FUNÇÕES AUXILIARES ---
+st.sidebar.header("⚙️ Configurações")
+if api_key_salva:
+    st.sidebar.success("✅ API Key carregada automaticamente dos Secrets!")
+    gemini_api_key = api_key_salva
+else:
+    gemini_api_key = st.sidebar.text_input(
+        "Cole sua API Key do Gemini:",
+        type="password",
+        help="Insira a chave do Google AI Studio. Para não precisar digitar sempre, salve no menu Secrets do Streamlit Cloud."
+    )
+
+# --- FUNÇÕES AUXILIARES DE BUSCA E DADOS ---
 def limpar_cnpj(cnpj_raw: str) -> str:
     return re.sub(r'\D', '', cnpj_raw)
 
@@ -72,8 +78,20 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
-        # Utiliza o modelo estável oficial da API gratuita
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # Seleção dinâmica de modelos para evitar erro 404
+        nome_modelo = "gemini-1.5-flash"
+        try:
+            modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            flash_models = [m for m in modelos if 'flash' in m]
+            if flash_models:
+                nome_modelo = flash_models[0]
+            elif modelos:
+                nome_modelo = modelos[0]
+        except Exception:
+            pass
+            
+        model = genai.GenerativeModel(nome_modelo)
         
         prompt = f"""
         Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
@@ -98,7 +116,7 @@ cnpj_input = st.text_input("Digite o CNPJ da escola:", placeholder="Ex: 00.000.0
 
 if st.button("Buscar Contatos", type="primary"):
     if not gemini_api_key:
-        st.error("⚠️ Insira a sua API Key do Gemini na barra lateral esquerda antes de realizar a pesquisa.")
+        st.error("⚠️ Insira ou configure a sua API Key do Gemini antes de realizar a pesquisa.")
     elif not cnpj_input:
         st.warning("⚠️ Digite um CNPJ válido.")
     else:
@@ -119,10 +137,16 @@ if st.button("Buscar Contatos", type="primary"):
                 
                 st.success("✅ Escola localizada com sucesso!")
                 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Razão Social", razao_social)
-                col2.metric("Nome Fantasia / Escola", nome_fantasia)
-                col3.metric("Telefone Oficial (Receita)", tel_oficial if len(tel_oficial) > 4 else "Não informado")
+                # --- NOVO LAYOUT LIMPO E EXPANDIDO ---
+                with st.container(border=True):
+                    st.subheader("📋 Dados Cadastrais da Instituição")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Razão Social:**\n{razao_social}")
+                        st.markdown(f"**Nome Fantasia / Escola:**\n{nome_fantasia}")
+                    with col2:
+                        st.markdown(f"**Telefone Oficial (Receita):**\n{tel_oficial if len(tel_oficial) > 4 else 'Não informado'}")
+                        st.markdown(f"**CNPJ:**\n{cnpj_limpo}")
                 
                 # Registro do Domínio (RDAP)
                 site_contato = dados_empresa.get("email")
@@ -130,7 +154,7 @@ if st.button("Buscar Contatos", type="primary"):
                     dominio = site_contato.split("@")[-1]
                     dados_rdap = consultar_rdap(dominio)
                     if dados_rdap and dados_rdap.get("emails"):
-                        st.info(f"🌐 **Domínio da Instituição ({dominio}):** E-mails públicos associados: {', '.join(dados_rdap['emails'])}")
+                        st.info(f"🌐 **Domínio da Instituição ({dominio}):** E-mails públicos encontrados: {', '.join(dados_rdap['emails'])}")
                 
                 st.divider()
                 st.subheader(f"👥 Quadro de Sócios e Mantenedores ({len(socios)} localizados)")
@@ -139,7 +163,6 @@ if st.button("Buscar Contatos", type="primary"):
                     st.warning("Nenhum sócio listado no registro público desta empresa.")
                 
                 for idx, socio in enumerate(socios):
-                    # Tratamento robusto para extração do nome do sócio
                     nome_socio = socio.get("nome_socio_razao_social") or socio.get("nome_socio") or socio.get("nome") or "Sócio não identificado"
                     cargo = socio.get("qualificacao_socio") or "Sócio/Administrador"
                     
@@ -151,7 +174,7 @@ if st.button("Buscar Contatos", type="primary"):
                         st.markdown("**Relatório de Contatos e Liderança:**")
                         st.markdown(resultado_gemini)
                         
-                        # Extração para geração de link do WhatsApp
+                        # Extração para geração do botão do WhatsApp
                         numeros_encontrados = re.findall(r'(?:55)?\s?(?:[1-9]{2})\s?9?[0-9]{4}[-\s]?[0-9]{4}', resultado_gemini)
                         if numeros_encontrados:
                             num_limpo = re.sub(r'\D', '', numeros_encontrados[0])
