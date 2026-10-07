@@ -110,13 +110,8 @@ if st.button("Buscar Contatos", type="primary"):
                 col3.metric("Telefone Oficial (Receita)", tel_oficial if len(tel_oficial) > 4 else "Não informado")
                 
                 # Registro.br Check
-                site_contato = dados_empresa.get("email", "")
-                if "@" in site_contato:
-                    dominio = site_contato.split("@")[-1]
-                    dados_rdap = consultar_rdap(dominio)
-                    if dados_rdap and dados_rdap.get("emails"):
-                        st.info(f"🌐 **Domínio da empresa ({dominio}):** E-mails públicos encontrados: {', '.join(dados_rdap['emails'])}")
-                
+                site_contato = dados_empresa.get("email")
+                if site_contato and "@" in site_contato:
                 st.divider()
                 st.subheader(f"👥 Quadro de Sócios ({len(socios)} encontrados)")
                 
