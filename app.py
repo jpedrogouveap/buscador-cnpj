@@ -1,17 +1,18 @@
 import re
 import requests
+import urllib.parse
 import streamlit as st
 from duckduckgo_search import DDGS
 import google.generativeai as genai
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Buscador de Mantenedores v2.0",
+    page_title="Buscador de Mantenedores v2.1",
     page_icon="🏫",
     layout="wide"
 )
 
-st.title("🏫 Buscador de Sócios e Mantenedores de Escolas [v2.0]")
+st.title("🏫 Buscador de Sócios e Mantenedores de Escolas [v2.1]")
 st.caption("Investigação OSINT para o setor educacional (BrasilAPI, RDAP/Registro.br, DuckDuckGo e Gemini AI).")
 
 # --- GERENCIAMENTO DA API KEY ---
@@ -28,6 +29,7 @@ else:
         help="Insira a chave do Google AI Studio."
     )
 
+# --- FUNÇÕES AUXILIARES ---
 def limpar_cnpj(cnpj_raw: str) -> str:
     return re.sub(r'\D', '', cnpj_raw)
 
@@ -52,21 +54,30 @@ def consultar_rdap(dominio: str):
     except Exception:
         return None
 
-def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
+def buscar_osint_ampliada(nome_socio: str, razao_social: str, nome_fantasia: str, cidade: str, uf: str, ddd: str):
     textos_resultados = []
     try:
         ddgs = DDGS()
+        
+        # 1. Busca Direta: Sócio + Cidade + Contato
         if nome_socio and nome_socio != "Sócio não identificado":
-            q1 = f'"{nome_socio}" "{nome_fantasia}" (diretor OR mantenedor OR proprietario OR dono OR whatsapp OR celular)'
+            q1 = f'"{nome_socio}" "{cidade}" (whatsapp OR celular OR telefone OR contato)'
             r1 = list(ddgs.text(q1, max_results=4))
             for r in r1:
-                textos_resultados.append(f"- [Sócio/Liderança]: {r.get('title')}: {r.get('body')}")
+                textos_resultados.append(f"- [Busca Sócio Directa]: {r.get('title')}: {r.get('body')}")
             
-        q2 = f'"{nome_fantasia}" (escola OR colegio) (direção OR mantenedora OR comercial OR matriculas OR whatsapp OR "9")'
-        r2 = list(ddgs.text(q2, max_results=4))
+        # 2. Busca em Agregadores B2B Públicos
+        q2 = f'"{nome_fantasia}" "{cidade}" (site:casadosdados.com.br OR site:cnpj.biz OR site:econodata.com.br)'
+        r2 = list(ddgs.text(q2, max_results=3))
         for r in r2:
-            textos_resultados.append(f"- [Instituição]: {r.get('title')}: {r.get('body')}")
-            
+            textos_resultados.append(f"- [Agregador B2B]: {r.get('title')}: {r.get('body')}")
+
+        # 3. Busca Comercial da Escola + DDD da Região
+        q3 = f'"{nome_fantasia}" "{cidade}" ({ddd}) OR whatsapp'
+        r3 = list(ddgs.text(q3, max_results=4))
+        for r in r3:
+            textos_resultados.append(f"- [Canais da Escola]: {r.get('title')}: {r.get('body')}")
+
     except Exception:
         textos_resultados.append("Erro ou limite atingido nas buscas abertas da web.")
         
@@ -75,21 +86,19 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
-        
-        # Chamada direta ao modelo indicado na mensagem de erro da API
         model = genai.GenerativeModel('gemini-3.8-flash')
 
         prompt = f"""
-        Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
-        Analise as informações obtidas na web para a escola '{nome_fantasia}' ({razao_social}) e o sócio/mantenedor '{nome_socio}'.
+        Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL.
+        Analise as informações obtidas na web para a escola '{nome_fantasia}' ({razao_social}) e o sócio '{nome_socio}'.
         
         Texto das buscas:
         {texto_busca}
         
         Instruções de Resposta:
         1. Extraia e liste todos os telefones, celulares, números de WhatsApp e e-mails encontrados.
-        2. Classifique a origem de cada contato (ex: Celular/WhatsApp Direto do Mantenedor, Linha da Direção, Secretaria/Matrículas).
-        3. Se não houver nenhum número direto localizado, responda exatamente: 'Nenhum número direto localizado nas fontes abertas.'
+        2. Classifique a origem de cada contato (ex: Celular do Mantenedor, Linha da Direção, Secretaria/Matrículas).
+        3. Se não houver nenhum número no texto, responda exatamente: 'Nenhum número direto localizado nos trechos da web.'
         4. Seja extremamente objetivo e utilize tópicos (bullet points).
         """
         response = model.generate_content(prompt)
@@ -118,7 +127,10 @@ if st.button("Buscar Contatos", type="primary"):
             else:
                 razao_social = dados_empresa.get("razao_social", "N/A")
                 nome_fantasia = dados_empresa.get("nome_fantasia") or razao_social
-                tel_oficial = f"({dados_empresa.get('ddd_telefone_1', '')[:2]}) {dados_empresa.get('ddd_telefone_1', '')[2:]}"
+                ddd = dados_empresa.get('ddd_telefone_1', '')[:2]
+                tel_oficial = f"({ddd}) {dados_empresa.get('ddd_telefone_1', '')[2:]}"
+                cidade = dados_empresa.get("municipio", "")
+                uf = dados_empresa.get("uf", "")
                 socios = dados_empresa.get("qsa", [])
                 
                 st.success("✅ Escola localizada com sucesso!")
@@ -131,8 +143,9 @@ if st.button("Buscar Contatos", type="primary"):
                         st.markdown(f"**Nome Fantasia / Escola:**\n{nome_fantasia}")
                     with col2:
                         st.markdown(f"**Telefone Oficial (Receita):**\n{tel_oficial if len(tel_oficial) > 4 else 'Não informado'}")
-                        st.markdown(f"**CNPJ:**\n{cnpj_limpo}")
+                        st.markdown(f"**Localização:**\n{cidade} - {uf}")
                 
+                # Registro do Domínio (RDAP)
                 site_contato = dados_empresa.get("email")
                 if site_contato and isinstance(site_contato, str) and "@" in site_contato:
                     dominio = site_contato.split("@")[-1]
@@ -151,16 +164,26 @@ if st.button("Buscar Contatos", type="primary"):
                     cargo = socio.get("qualificacao_socio") or "Sócio/Administrador"
                     
                     with st.expander(f"👤 Mantenedor/Sócio {idx+1}: {nome_socio} ({cargo})", expanded=True):
-                        with st.spinner(f"Pesquisando fontes abertas para {nome_socio} e {nome_fantasia}..."):
-                            texto_osint = buscar_osint_escola(nome_socio, razao_social, nome_fantasia)
+                        with st.spinner(f"Pesquisando fontes abertas e agregadores para {nome_socio}..."):
+                            texto_osint = buscar_osint_ampliada(nome_socio, razao_social, nome_fantasia, cidade, uf, ddd)
                             resultado_gemini = analisar_com_gemini_escola(gemini_api_key, nome_socio, razao_social, nome_fantasia, texto_osint)
                         
                         st.markdown("**Relatório de Contatos e Liderança:**")
                         st.markdown(resultado_gemini)
+                        
+                        # Ações rápidas: WhatsApp e Google Dork manual
+                        col_a, col_b = st.columns(2)
                         
                         numeros_encontrados = re.findall(r'(?:55)?\s?(?:[1-9]{2})\s?9?[0-9]{4}[-\s]?[0-9]{4}', resultado_gemini)
                         if numeros_encontrados:
                             num_limpo = re.sub(r'\D', '', numeros_encontrados[0])
                             if not num_limpo.startswith('55'):
                                 num_limpo = '55' + num_limpo
-                            st.link_button(f"💬 Iniciar conversa no WhatsApp ({nome_socio})", f"https://wa.me/{num_limpo}")
+                            with col_a:
+                                st.link_button(f"💬 WhatsApp ({nome_socio})", f"https://wa.me/{num_limpo}")
+                        
+                        # Link direto para Google Dorking
+                        query_google = urllib.parse.quote(f'"{nome_socio}" "{cidade}" whatsapp OR celular')
+                        url_google = f"https://www.google.com/search?q={query_google}"
+                        with col_b:
+                            st.link_button(f"🔎 Investigar {nome_socio} no Google", url_google)
