@@ -4,24 +4,25 @@ import streamlit as st
 from duckduckgo_search import DDGS
 import google.generativeai as genai
 
-# Configuração visual do aplicativo
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Buscador de Sócios OSINT",
-    page_icon="🔍",
+    page_title="Buscador de Mantenedores e Escolas OSINT",
+    page_icon="🏫",
     layout="wide"
 )
 
-st.title("🔍 Buscador Gratuito de Contatos de Sócios")
-st.caption("Consulta automatizada via BrasilAPI, RDAP (Registro.br), OSINT Web e Gemini AI.")
+st.title("🏫 Buscador de Sócios e Mantenedores de Escolas")
+st.caption("Investigação OSINT direcionada para o setor educacional (BrasilAPI, RDAP/Registro.br, DuckDuckGo e Gemini AI).")
 
-# Barra lateral para colar a chave
-st.sidebar.header("Configuração")
+# --- BARRA LATERAL ---
+st.sidebar.header("Configurações")
 gemini_api_key = st.sidebar.text_input(
-    "Cole sua API Key do Gemini (Pessoal):",
+    "Cole a sua API Key do Gemini (Pessoal):",
     type="password",
-    help="Cole a chave que você gerou no Google AI Studio com seu Gmail Pessoal."
+    help="Insira a chave gerada no Google AI Studio com o seu Gmail Pessoal."
 )
 
+# --- FUNÇÕES AUXILIARES ---
 def limpar_cnpj(cnpj_raw: str) -> str:
     return re.sub(r'\D', '', cnpj_raw)
 
@@ -36,62 +37,74 @@ def consultar_brasilapi(cnpj: str):
 
 def consultar_rdap(dominio: str):
     try:
-        dom_limpo = dominio.replace("http://", "").replace("https://", "").replace("www.", "").split("/")[0]
+        dom_limpo = dominio.replace("http://", "").replace("https://", "").replace("www.", "").split("/")[0].strip()
         res = requests.get(f"https://rdap.registro.br/domain/{dom_limpo}", timeout=8)
         if res.status_code == 200:
             data = res.json()
-            e_mails = [e.get("email") for e in data.get("entities", []) if "email" in e]
+            e_mails = [e.get("email") for e in data.get("entities", []) if "email" in e and e.get("email")]
             return {"emails": list(set(e_mails))}
         return None
     except Exception:
         return None
 
-def buscar_osint_duckduckgo(nome_socio: str, razao_social: str):
+def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
+    textos_resultados = []
     try:
         ddgs = DDGS()
-        query = f'"{nome_socio}" "{razao_social}" (telefone OR whatsapp OR celular OR contato)'
-        results = list(ddgs.text(query, max_results=5))
-        return "\n".join([f"- {r.get('title')}: {r.get('body')}" for r in results])
+        # Busca 1: Focada no Sócio + Escola + Cargos de Liderança
+        q1 = f'"{nome_socio}" "{nome_fantasia}" (diretor OR mantenedor OR proprietario OR dono OR whatsapp OR celular)'
+        r1 = list(ddgs.text(q1, max_results=4))
+        for r in r1:
+            textos_resultados.append(f"- [Sócio/Liderança]: {r.get('title')}: {r.get('body')}")
+            
+        # Busca 2: Focada nos Canais Diretos da Escola
+        q2 = f'"{nome_fantasia}" (escola OR colegio) (direção OR mantenedora OR comercial OR matriculas OR whatsapp OR "9")'
+        r2 = list(ddgs.text(q2, max_results=4))
+        for r in r2:
+            textos_resultados.append(f"- [Instituição]: {r.get('title')}: {r.get('body')}")
+            
     except Exception:
-        return "Erro ou limite atingido nas buscas abertas da web."
+        textos_resultados.append("Erro ou limite atingido nas buscas abertas da web.")
+        
+    return "\n".join(textos_resultados)
 
-def analisar_com_gemini(api_key: str, nome_socio: str, razao_social: str, texto_busca: str):
+def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = f"""
-        Você é um analista especialista em investigação de contatos (OSINT).
-        Analise o texto retornado da internet para o sócio '{nome_socio}' da empresa '{razao_social}'.
+        Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
+        Analise as informações obtidas na web para a escola '{nome_fantasia}' ({razao_social}) e o sócio/mantenedor '{nome_socio}'.
         
         Texto das buscas:
         {texto_busca}
         
-        Instruções:
-        1. Extraia qualquer número de celular, telefone fixo ou link de WhatsApp associado a essa pessoa ou empresa.
-        2. Se encontrar números, formate-os e indique o nível de certeza (ex: Alto para celular direto do sócio, Médio para telefone comercial).
-        3. Se não houver nenhum número no texto, responda exatamente: 'Nenhum número direto localizado nas fontes abertas.'
-        4. Seja extremamente direto. Use tópicos simples.
+        Instruções de Resposta:
+        1. Extraia e liste todos os telefones, telemóveis, números de WhatsApp e e-mails encontrados.
+        2. Classifique a origem de cada contacto (ex: Telemóvel/WhatsApp Direto do Mantenedor, Linha da Direção, Secretaria/Matrículas).
+        3. Se não houver nenhum número direto localizado, responda exatamente: 'Nenhum número direto localizado nas fontes abertas.'
+        4. Seja extremamente objetivo e utilize marcadores (bullet points).
         """
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
         return f"Erro na análise da IA: {str(e)}"
 
-# Entrada do CNPJ
-cnpj_input = st.text_input("Digite o CNPJ da empresa:", placeholder="Ex: 00.000.000/0001-00")
+# --- INTERFACE PRINCIPAL ---
+cnpj_input = st.text_input("Digite o CNPJ da escola:", placeholder="Ex: 00.000.000/0001-00")
 
 if st.button("Buscar Contatos", type="primary"):
     if not gemini_api_key:
-        st.error("⚠️ Insira sua API Key do Gemini na barra lateral esquerda antes de buscar.")
+        st.error("⚠️ Insira a sua API Key do Gemini na barra lateral esquerda antes de realizar a pesquisa.")
     elif not cnpj_input:
-        st.warning("⚠️ Digite um CNPJ.")
+        st.warning("⚠️ Digite um CNPJ válido.")
     else:
         cnpj_limpo = limpar_cnpj(cnpj_input)
         if len(cnpj_limpo) != 14:
-            st.error("❌ O CNPJ deve conter 14 dígitos.")
+            st.error("❌ O CNPJ deve conter exatamente 14 dígitos.")
         else:
-            with st.spinner("Consultando dados da Receita Federal..."):
+            with st.spinner("Consultando dados cadastrais na Receita Federal..."):
                 dados_empresa = consultar_brasilapi(cnpj_limpo)
             
             if not dados_empresa:
@@ -102,38 +115,43 @@ if st.button("Buscar Contatos", type="primary"):
                 tel_oficial = f"({dados_empresa.get('ddd_telefone_1', '')[:2]}) {dados_empresa.get('ddd_telefone_1', '')[2:]}"
                 socios = dados_empresa.get("qsa", [])
                 
-                st.success("✅ Empresa localizada!")
+                st.success("✅ Escola localizada com sucesso!")
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Razão Social", razao_social)
-                col2.metric("Nome Fantasia", nome_fantasia)
+                col2.metric("Nome Fantasia / Escola", nome_fantasia)
                 col3.metric("Telefone Oficial (Receita)", tel_oficial if len(tel_oficial) > 4 else "Não informado")
                 
-                # Registro.br Check
+                # Registo do Domínio (RDAP)
                 site_contato = dados_empresa.get("email")
-                if site_contato and "@" in site_contato:
+                if site_contato and isinstance(site_contato, str) and "@" in site_contato:
+                    dominio = site_contato.split("@")[-1]
+                    dados_rdap = consultar_rdap(dominio)
+                    if dados_rdap and dados_rdap.get("emails"):
+                        st.info(f"🌐 **Domínio da Instituição ({dominio}):** E-mails públicos associados: {', '.join(dados_rdap['emails'])}")
+                
                 st.divider()
-                st.subheader(f"👥 Quadro de Sócios ({len(socios)} encontrados)")
+                st.subheader(f"👥 Quadro de Sócios e Mantenedores ({len(socios)} localizados)")
                 
                 if not socios:
-                    st.warning("Nenhum sócio listado no cadastro público desta empresa.")
+                    st.warning("Nenhum sócio listado no registo público desta empresa.")
                 
                 for idx, socio in enumerate(socios):
                     nome_socio = socio.get("nome_socio_razao_social")
                     cargo = socio.get("qualificacao_socio")
                     
-                    with st.expander(f"👤 {nome_socio} ({cargo})", expanded=True):
-                        with st.spinner(f"Pesquisando rastros públicos na web para {nome_socio}..."):
-                            texto_osint = buscar_osint_duckduckgo(nome_socio, razao_social)
-                            resultado_gemini = analisar_com_gemini(gemini_api_key, nome_socio, razao_social, texto_osint)
+                    with st.expander(f"👤 Mantenedor/Sócio {idx+1}: {nome_socio} ({cargo})", expanded=True):
+                        with st.spinner(f"A pesquisar fontes abertas para {nome_socio} e {nome_fantasia}..."):
+                            texto_osint = buscar_osint_escola(nome_socio, razao_social, nome_fantasia)
+                            resultado_gemini = analisar_com_gemini_escola(gemini_api_key, nome_socio, razao_social, nome_fantasia, texto_osint)
                         
-                        st.markdown("**Relatório de Contatos Encontrados:**")
+                        st.markdown("**Relatório de Contactos e Liderança:**")
                         st.markdown(resultado_gemini)
                         
-                        # Extrai telefone para gerar o botão do WhatsApp
+                        # Extração para geração de link do WhatsApp
                         numeros_encontrados = re.findall(r'(?:55)?\s?(?:[1-9]{2})\s?9?[0-9]{4}[-\s]?[0-9]{4}', resultado_gemini)
                         if numeros_encontrados:
                             num_limpo = re.sub(r'\D', '', numeros_encontrados[0])
                             if not num_limpo.startswith('55'):
                                 num_limpo = '55' + num_limpo
-                            st.link_button(f"💬 Iniciar conversa no WhatsApp com {nome_socio}", f"https://wa.me/{num_limpo}")
+                            st.link_button(f"💬 Iniciar conversa no WhatsApp ({nome_socio})", f"https://wa.me/{num_limpo}")
