@@ -52,10 +52,11 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
     try:
         ddgs = DDGS()
         # Busca 1: Focada no Sócio + Escola + Cargos de Liderança
-        q1 = f'"{nome_socio}" "{nome_fantasia}" (diretor OR mantenedor OR proprietario OR dono OR whatsapp OR celular)'
-        r1 = list(ddgs.text(q1, max_results=4))
-        for r in r1:
-            textos_resultados.append(f"- [Sócio/Liderança]: {r.get('title')}: {r.get('body')}")
+        if nome_socio and nome_socio != "Sócio não identificado":
+            q1 = f'"{nome_socio}" "{nome_fantasia}" (diretor OR mantenedor OR proprietario OR dono OR whatsapp OR celular)'
+            r1 = list(ddgs.text(q1, max_results=4))
+            for r in r1:
+                textos_resultados.append(f"- [Sócio/Liderança]: {r.get('title')}: {r.get('body')}")
             
         # Busca 2: Focada nos Canais Diretos da Escola
         q2 = f'"{nome_fantasia}" (escola OR colegio) (direção OR mantenedora OR comercial OR matriculas OR whatsapp OR "9")'
@@ -66,12 +67,13 @@ def buscar_osint_escola(nome_socio: str, razao_social: str, nome_fantasia: str):
     except Exception:
         textos_resultados.append("Erro ou limite atingido nas buscas abertas da web.")
         
-    return "\n".join(textos_resultados)
+    return "\n".join(textos_resultados) if textos_resultados else "Nenhum resultado obtido na busca web."
 
 def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str, nome_fantasia: str, texto_busca: str):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Utiliza o modelo estável oficial da API gratuita
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
         Você é um analista especialista em prospecção B2B e OSINT para o setor EDUCACIONAL (Escolas e Colégios).
@@ -81,10 +83,10 @@ def analisar_com_gemini_escola(api_key: str, nome_socio: str, razao_social: str,
         {texto_busca}
         
         Instruções de Resposta:
-        1. Extraia e liste todos os telefones, telemóveis, números de WhatsApp e e-mails encontrados.
-        2. Classifique a origem de cada contacto (ex: Telemóvel/WhatsApp Direto do Mantenedor, Linha da Direção, Secretaria/Matrículas).
+        1. Extraia e liste todos os telefones, celulares, números de WhatsApp e e-mails encontrados.
+        2. Classifique a origem de cada contato (ex: Celular/WhatsApp Direto do Mantenedor, Linha da Direção, Secretaria/Matrículas).
         3. Se não houver nenhum número direto localizado, responda exatamente: 'Nenhum número direto localizado nas fontes abertas.'
-        4. Seja extremamente objetivo e utilize marcadores (bullet points).
+        4. Seja extremamente objetivo e utilize tópicos (bullet points).
         """
         response = model.generate_content(prompt)
         return response.text
@@ -122,7 +124,7 @@ if st.button("Buscar Contatos", type="primary"):
                 col2.metric("Nome Fantasia / Escola", nome_fantasia)
                 col3.metric("Telefone Oficial (Receita)", tel_oficial if len(tel_oficial) > 4 else "Não informado")
                 
-                # Registo do Domínio (RDAP)
+                # Registro do Domínio (RDAP)
                 site_contato = dados_empresa.get("email")
                 if site_contato and isinstance(site_contato, str) and "@" in site_contato:
                     dominio = site_contato.split("@")[-1]
@@ -134,18 +136,19 @@ if st.button("Buscar Contatos", type="primary"):
                 st.subheader(f"👥 Quadro de Sócios e Mantenedores ({len(socios)} localizados)")
                 
                 if not socios:
-                    st.warning("Nenhum sócio listado no registo público desta empresa.")
+                    st.warning("Nenhum sócio listado no registro público desta empresa.")
                 
                 for idx, socio in enumerate(socios):
-                    nome_socio = socio.get("nome_socio_razao_social")
-                    cargo = socio.get("qualificacao_socio")
+                    # Tratamento robusto para extração do nome do sócio
+                    nome_socio = socio.get("nome_socio_razao_social") or socio.get("nome_socio") or socio.get("nome") or "Sócio não identificado"
+                    cargo = socio.get("qualificacao_socio") or "Sócio/Administrador"
                     
                     with st.expander(f"👤 Mantenedor/Sócio {idx+1}: {nome_socio} ({cargo})", expanded=True):
-                        with st.spinner(f"A pesquisar fontes abertas para {nome_socio} e {nome_fantasia}..."):
+                        with st.spinner(f"Pesquisando fontes abertas para {nome_socio} e {nome_fantasia}..."):
                             texto_osint = buscar_osint_escola(nome_socio, razao_social, nome_fantasia)
                             resultado_gemini = analisar_com_gemini_escola(gemini_api_key, nome_socio, razao_social, nome_fantasia, texto_osint)
                         
-                        st.markdown("**Relatório de Contactos e Liderança:**")
+                        st.markdown("**Relatório de Contatos e Liderança:**")
                         st.markdown(resultado_gemini)
                         
                         # Extração para geração de link do WhatsApp
